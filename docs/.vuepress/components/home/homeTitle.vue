@@ -5,7 +5,7 @@
             <p>A database of Apple software and devices</p>
         </div>
         <div class="listWrapper">
-            <a href="/device-selection/">
+            <router-link to="/device-selection/">
                 <div class="listItem">
                     <div class="listImg">
                         <picture>
@@ -19,8 +19,8 @@
                         <div class="subtext">{{ deviceCount }} products</div>
                     </div>
                 </div>
-            </a>
-            <a href="/firmware.html">
+            </router-link>
+            <router-link to="/firmware.html">
                 <div class="listItem">
                     <div class="listImg">
                         <picture>
@@ -34,7 +34,7 @@
                         <div class="subtext">{{ softwareCount }} firmware versions</div>
                     </div>
                 </div>
-            </a>
+            </router-link>
         </div>
     </div>
 </template>

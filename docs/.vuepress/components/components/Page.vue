@@ -20,6 +20,7 @@
 
 <script>
 import { useThemeLocaleData } from '@vuepress/theme-default/lib/client/composables'
+import { siteUrl } from '../../siteUrl.js'
 
 export default {
   data() {
@@ -35,7 +36,7 @@ export default {
   async created() {
     const routeName = this.$route.name
     const routeParams = Object.keys(this.$route.params).map(x => this.$route.params[x])
-    fetch(`/pageData/${routeName}/${routeParams.join(';')}.json`.replace(/\.html/g,''), {
+    fetch(siteUrl(`/pageData/${routeName}/${routeParams.join(';')}.json`.replace(/\.html/g,'')), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       }

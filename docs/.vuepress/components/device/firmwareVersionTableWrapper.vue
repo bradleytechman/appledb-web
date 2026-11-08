@@ -189,6 +189,7 @@
 
 <script>
 import { markRaw } from 'vue'
+import { siteUrl } from '../../siteUrl.js'
 
 const ROW_ESTIMATE = 68
 
@@ -456,7 +457,7 @@ export default {
             this.$nextTick(() => this.onScroll())
         }
         if (this.firmwareIndex) {
-            fetch(this.firmwareIndex)
+            fetch(siteUrl(this.firmwareIndex))
                 .then(response => {
                     if (!response.ok) throw new Error(response.status)
                     return response.json()

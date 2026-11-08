@@ -165,6 +165,8 @@
 </template>
 
 <script>
+import { siteUrl } from '../../siteUrl.js'
+
 function projectLinks(groups, allow) {
     const out = []
     for (const group of groups || []) {
@@ -248,7 +250,7 @@ export default {
         loadDetail() {
             if (this.detail || this.detailLoading || !this.fw.detailUrl) return
             this.detailLoading = true
-            fetch(this.fw.detailUrl)
+            fetch(siteUrl(this.fw.detailUrl))
                 .then(response => {
                     if (!response.ok) throw new Error(response.status)
                     return response.json()

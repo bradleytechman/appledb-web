@@ -3,7 +3,10 @@ const { registerComponentsPlugin } = require('@vuepress/plugin-register-componen
 const { mediumZoomPlugin } = require('@vuepress/plugin-medium-zoom')
 const { localTheme } = require('../../emiyl-theme')
 
+const pagesBase = '/appledb-web/'
+
 module.exports = {
+    base: pagesBase,
     lang: 'en-US',
     title: 'AppleDB',
     description: 'A database of Apple software and devices.',
@@ -68,7 +71,7 @@ module.exports = {
     shouldPrefetch: false,
   
     head: [
-      [ 'meta', { property: 'og:image', content: '/assets/images/splash-23aaron-logo.jpg' } ],
+      [ 'meta', { property: 'og:image', content: `${pagesBase}assets/images/splash-23aaron-logo.jpg` } ],
       // [ 'script', { type: 'text/javascript', src: '//cdn.thisiswaldo.com/static/js/13821.js' }],
 
       [ 'link', { rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180' }],
