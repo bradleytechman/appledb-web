@@ -203,6 +203,7 @@ for (const fwChartPage of fwChartPageArr) {
       show: fwChartPage.show,
       grouped: true,
       mainList: true,
+      allDevices: fwChartPage.typeArr === '*',
       osStrArr: fwChartPage.osStrArr
     })
   )

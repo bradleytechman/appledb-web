@@ -1,7 +1,7 @@
 <template>
     <div
         class="wrapper firmwareVersionTableElement"
-        @click="expanded = !expanded"
+        @click="toggle()"
     >
         <div class="firmwareAndReleasedStr" :style="{'width': `calc(100% - ${(1 + showSingleDownloads) * 32}px)`}">
             <div>
@@ -29,7 +29,7 @@
                         {{ this.fw.build }}
                     </code>
                 </template>
-                <template v-if="this.fw.preinstalled.some(r => this.fw.devices.includes(r)) && (this.fw.filteredDownloads.length || this.fw.filteredOtas.length)">
+                <template v-if="fw.preinstalledOnDevice && (fw.hasDownload || downloads.length || otas.length)">
                     <i class="fas fa-box-open" style="padding-left: 8px;"/>
                 </template>
                 <div style="padding-inline: .25em; display: inline-block;"></div>
@@ -60,9 +60,9 @@
                 </span>
                 <div v-if="fw.rsr" class="releaseBetaInternalWrapper"><span>RSR</span></div>
                 <div v-if="fw.bsi" class="releaseBetaInternalWrapper"><span>BSI</span></div>
-                <div v-if="checkSigning" class="signingStatus">
-                    <i :id="`signing-status-${fw.osStr}-${fw.build}`" class="fas" :class="this.fw.signed.length ? 'fa-check' : 'fa-times'"></i>
-                    <span :id="`signing-text-${fw.osStr}-${fw.build}`" class="signingText">{{ this.fw.signed.length ? 'Signed' : 'Not signed' }}</span>
+                <div v-if="fw.checkSigning" class="signingStatus">
+                    <i :id="`signing-status-${fw.osStr}-${fw.build}`" class="fas" :class="fw.signed ? 'fa-check' : 'fa-times'"></i>
+                    <span :id="`signing-text-${fw.osStr}-${fw.build}`" class="signingText">{{ fw.signed ? 'Signed' : 'Not signed' }}</span>
                 </div>
             </div>
             <div style="text-align: right;" class="releasedStr" v-if="fw.releasedStr && options.showReleasedString">{{ fw.releasedStr }}</div>
@@ -71,7 +71,7 @@
         <div class="iconFlex">
             <template v-if="showSingleDownloads">
                 <div
-                    v-if="fw.filteredDownloads.length || fw.filteredOtas.length"
+                    v-if="fw.hasDownload || downloads.length || otas.length"
                     @click="openDownloadDropdown()"
                     class="downloadIcon iconChild"
                 >
@@ -81,25 +81,26 @@
                         'custom-container',
                         showDownloadDropdown ? 'active' : ''
                     ]" style="cursor: initial;">
-                        <template v-if="fw.filteredDownloads.length">
+                        <p v-if="detailLoading">Loading…</p>
+                        <template v-if="downloads.length">
                             <h5>Download</h5>
-                            <ul :style="`${fw.filteredDownloads.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
-                                <li v-if="fw.filteredDownloads.length == 1"><a :href="fw.filteredDownloads[0].url">{{ fw.filteredDownloads[0].deviceName.slice(0,60) }}{{ fw.filteredDownloads[0].deviceName.length > 60 ? '...' : '' }}</a></li>
-                                <li v-else v-for="dl in fw.filteredDownloads" :key="dl"><a :href="dl.url">{{ dl.deviceName }}</a></li>
+                            <ul :style="`${downloads.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
+                                <li v-if="downloads.length == 1"><a :href="downloads[0].url">{{ downloads[0].deviceName.slice(0,60) }}{{ downloads[0].deviceName.length > 60 ? '...' : '' }}</a></li>
+                                <li v-else v-for="dl in downloads" :key="dl.url"><a :href="dl.url">{{ dl.deviceName }}</a></li>
                             </ul>
                         </template>
-                        <template v-if="fw.filteredOtas.length">
+                        <template v-if="otas.length">
                             <h5>Download (OTA)</h5>
-                            <ul :style="`${fw.filteredOtas.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
-                                <li v-if="fw.filteredOtas.length == 1"><a :href="fw.filteredOtas[0].url">{{ fw.filteredOtas[0].deviceName.slice(0,60) }}{{ fw.filteredOtas[0].deviceName.length > 60 ? '...' : '' }}</a></li>
-                                <li v-else v-for="dl in fw.filteredOtas" :key="dl"><a :href="dl.url">{{ dl.deviceName }}</a></li>
+                            <ul :style="`${otas.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
+                                <li v-if="otas.length == 1"><a :href="otas[0].url">{{ otas[0].deviceName.slice(0,60) }}{{ otas[0].deviceName.length > 60 ? '...' : '' }}</a></li>
+                                <li v-else v-for="dl in otas" :key="dl.url"><a :href="dl.url">{{ dl.deviceName }}</a></li>
                             </ul>
                         </template>
                     </div>
                 </div>
 
                 <div
-                    v-else-if="fw.preinstalled.some(r => fw.devices.includes(r))"
+                    v-else-if="fw.preinstalledOnDevice"
                     @click="openDownloadDropdown()"
                     class="downloadIcon iconChild"
                 >
@@ -137,10 +138,10 @@
             <grid :content="fwData.content" :sectionClass="fwData.class + ' blue' || ''"/>
             <br>
         </div>
-        <div v-if="fw.jailbreakArr.length" class="custom-container">
+        <div v-if="jailbreaks.length" class="custom-container">
             <h5>Jailbreaks</h5>
             <ul>
-                <li v-for="jb in fw.jailbreakArr" :key="jb"><router-link :to="encodeURI(`/jailbreak/${jb.replace(/ /g, '-')}.html`)">{{ jb }}</router-link></li>
+                <li v-for="jb in jailbreaks" :key="jb"><router-link :to="encodeURI(`/jailbreak/${jb.replace(/ /g, '-')}.html`)">{{ jb }}</router-link></li>
             </ul>
         </div>
         <div class="custom-container">
@@ -164,38 +165,109 @@
 </template>
 
 <script>
+function projectLinks(groups, allow) {
+    const out = []
+    for (const group of groups || []) {
+        const links = group.links || []
+        let first = null
+        if (!allow) first = links[0]
+        else {
+            for (const link of links) {
+                if (allow.has(link.key)) {
+                    first = link
+                    break
+                }
+            }
+        }
+        if (!first) continue
+        out.push({ url: group.url, deviceName: first.deviceName, key: first.key })
+    }
+    return out
+}
+
+function projectDetail(detail, allow) {
+    const jailbreakArr = []
+    for (const jb of detail.jailbreaks || []) {
+        if (!allow) {
+            jailbreakArr.push(jb.name)
+            continue
+        }
+        for (const key of jb.devices || []) {
+            if (allow.has(key)) {
+                jailbreakArr.push(jb.name)
+                break
+            }
+        }
+    }
+    return {
+        filteredDownloads: projectLinks(detail.filteredDownloads, allow),
+        filteredOtas: projectLinks(detail.filteredOtas, allow),
+        jailbreakArr
+    }
+}
+
 export default {
     props: {
         fw: Object,
         options: Object,
         showSingleDownloads: Boolean,
         hasFirmwares: Object,
-        showDots: Boolean
+        showDots: Boolean,
+        deviceKeySet: {
+            default: null
+        }
     },
     data() {
         return {
             expanded: false,
             showDownloadDropdown: false,
             fwData: [],
-            tags: [],
-            checkSigning: false
+            detail: null,
+            detailLoading: false
         }
     },
-    mounted() {
-        this.checkSigning = (Array.isArray(this.fw.showSigning)) ? (this.fw.devices.filter(x => this.fw.showSigning.includes(x)).length > 0) : this.fw.showSigning;
-        this.fw.jailbreakArr = Object.keys(this.fw.jailbreakCompatibility).filter(x => this.fw.devices.filter(y => this.fw.jailbreakCompatibility[x].includes(y)).length);
-        this.fw.signed = this.fw.signed.filter(x => this.fw.devices.includes(x))
-        
-        this.tags = [
-        ].filter(x => x.val)
+    computed: {
+        downloads() {
+            if (this.detail) return this.detail.filteredDownloads
+            return this.fw.filteredDownloads || []
+        },
+        otas() {
+            if (this.detail) return this.detail.filteredOtas
+            return this.fw.filteredOtas || []
+        },
+        jailbreaks() {
+            if (this.detail) return this.detail.jailbreakArr
+            return this.fw.jailbreakArr || []
+        }
     },
     methods: {
+        toggle() {
+            this.expanded = !this.expanded
+            if (this.expanded) this.loadDetail()
+        },
+        loadDetail() {
+            if (this.detail || this.detailLoading || !this.fw.detailUrl) return
+            this.detailLoading = true
+            fetch(this.fw.detailUrl)
+                .then(response => {
+                    if (!response.ok) throw new Error(response.status)
+                    return response.json()
+                })
+                .then(detail => {
+                    this.detail = projectDetail(detail, this.deviceKeySet)
+                })
+                .catch(() => {})
+                .finally(() => {
+                    this.detailLoading = false
+                })
+        },
         openDownloadDropdown() {
             var elements = document.getElementsByClassName('downloadDropdown active')
             for (let element of elements) element.classList.remove('active')
 
             this.expanded = !this.expanded
             this.showDownloadDropdown = !this.showDownloadDropdown
+            this.loadDetail()
         }
     }
 }

@@ -1,5 +1,8 @@
+const fs = require('fs')
+const path = require('path')
 const iosList = require('../../../../../grabData/ios')
 const jbList = require('../../../../../grabData/jailbreak')
+const deviceList = require('../../../../../grabData/deviceList')
 const deviceFilterGroups = require('../../../../../appledb/appledb-web/deviceFilterGroups.json')
 
 const hasJbArr = [
@@ -14,19 +17,190 @@ const hasJbArr = [
     'tvOS',
     'watchOS'
 ]
+const hasJbSet = new Set(hasJbArr)
 
-function getFilteredDownloads(dlArr) {
-    const retArr = dlArr
-    const urlCount = Array.from(new Set(retArr)).length
+const devTypeCache = new Map()
+function getDevType(type) {
+    if (devTypeCache.has(type)) return devTypeCache.get(type)
+    let label = type
+    for (const devType of deviceFilterGroups) {
+        if (devType.types.includes(type)) {
+            label = devType.label
+            break
+        }
+    }
+    devTypeCache.set(type, label)
+    return label
+}
 
-    if (urlCount == 1) return [retArr[0]]
-    else return retArr
+function deviceMapKeys(deviceMap) {
+    if (!deviceMap) return []
+    return Array.isArray(deviceMap) ? deviceMap : Object.keys(deviceMap)
+}
+
+function flattenDevices(devices) {
+    const out = []
+    const stack = Array.isArray(devices) ? devices.slice() : (devices ? [devices] : [])
+    while (stack.length) {
+        const item = stack.pop()
+        if (Array.isArray(item)) stack.push(...item)
+        else if (item) out.push(item)
+    }
+    return out
+}
+
+const jbByBuild = new Map()
+for (const jb of jbList) {
+    if (!jb.compatibility) continue
+    for (const entry of jb.compatibility) {
+        const devices = flattenDevices(entry.devices)
+        for (const build of entry.firmwares || []) {
+            let list = jbByBuild.get(build)
+            if (!list) {
+                list = []
+                jbByBuild.set(build, list)
+            }
+            list.push({ name: jb.name, devices })
+        }
+    }
+}
+
+function activeUrl(source) {
+    if (!source || !source.links) return null
+    for (const link of source.links) {
+        if (link && link.active && link.url) return link.url
+    }
+    return null
+}
+
+const detailCache = new Map()
+function firmwareDetail(fw) {
+    const id = `${fw.osStr}\0${fw.uniqueBuild}`
+    const cached = detailCache.get(id)
+    if (cached) return cached
+
+    function collect(propertyName) {
+        if (!fw.sources) return []
+        const deviceUrl = new Map()
+        const order = []
+        for (const source of fw.sources) {
+            if (source.type != propertyName) continue
+            const url = activeUrl(source)
+            if (!url) continue
+            for (const key of deviceMapKeys(source.deviceMap)) {
+                if (deviceUrl.has(key) || !deviceList[key]) continue
+                deviceUrl.set(key, url)
+                order.push(key)
+            }
+        }
+        const byUrl = new Map()
+        for (const key of order) {
+            const url = deviceUrl.get(key)
+            let group = byUrl.get(url)
+            if (!group) {
+                group = { url, links: [] }
+                byUrl.set(url, group)
+            }
+            group.links.push({ key, deviceName: deviceList[key].name })
+        }
+        return Array.from(byUrl.values())
+    }
+
+    const onFirmware = new Set(deviceMapKeys(fw.deviceMap))
+    const jailbreaks = []
+    const seenJb = new Set()
+    if (hasJbSet.has(fw.osStr) && fw.build && jbByBuild.has(fw.build)) {
+        for (const entry of jbByBuild.get(fw.build)) {
+            if (seenJb.has(entry.name)) continue
+            const devices = []
+            for (const key of entry.devices) if (onFirmware.has(key)) devices.push(key)
+            if (!devices.length) continue
+            seenJb.add(entry.name)
+            jailbreaks.push({ name: entry.name, devices })
+        }
+    }
+
+    const detail = {
+        filteredDownloads: collect('ipsw'),
+        filteredOtas: collect('ota'),
+        jailbreaks
+    }
+    detailCache.set(id, detail)
+    return detail
+}
+
+function linksForPage(groups, devKeySet) {
+    const out = []
+    for (const group of groups) {
+        let first = null
+        for (const link of group.links) {
+            if (devKeySet.has(link.key)) {
+                first = link
+                break
+            }
+        }
+        if (!first) continue
+        out.push({ url: group.url, deviceName: first.deviceName, key: first.key })
+    }
+    return out
+}
+
+function jailbreakNamesForPage(jailbreaks, devKeySet) {
+    const names = []
+    for (const jb of jailbreaks) {
+        for (const key of jb.devices) {
+            if (devKeySet.has(key)) {
+                names.push(jb.name)
+                break
+            }
+        }
+    }
+    return names
+}
+
+const dateOffset = (new Date().getTimezoneOffset() * 60 * 1000) + (60 * 60000)
+const releasedFormatters = [
+    new Intl.DateTimeFormat('en-US', { year: 'numeric' }),
+    new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short' }),
+    new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' })
+]
+function formatReleased(released) {
+    if (!released) return undefined
+    const parts = released.split('-').length
+    const adjusted = new Date(Date.parse(released) + dateOffset)
+    return releasedFormatters[Math.min(Math.max(parts, 1), 3) - 1].format(adjusted)
+}
+
+const detailDir = path.resolve('docs/.vuepress/public/pageData/firmware-detail')
+const indexDir = path.resolve('docs/.vuepress/public/pageData/firmware-index')
+const writtenDetails = new Set()
+let detailDirReady = false
+
+function detailFileName(fw) {
+    return `${fw.osStr}__${fw.uniqueBuild}`.replace(/[^A-Za-z0-9._-]+/g, '-') + '.json'
+}
+
+function writeDetailOnce(fw, detail) {
+    const name = detailFileName(fw)
+    if (!writtenDetails.has(name)) {
+        if (!detailDirReady) {
+            fs.mkdirSync(detailDir, { recursive: true })
+            detailDirReady = true
+        }
+        fs.writeFileSync(path.join(detailDir, name), JSON.stringify(detail))
+        writtenDetails.add(name)
+    }
+    return `/pageData/firmware-detail/${name}`
+}
+
+function chartSlug(pagePath) {
+    return pagePath.replace(/^\//, '').replace(/\.html$/, '').replace(/\//g, '__') || 'firmware'
 }
 
 module.exports = function(args) {
     if (!Array.isArray(args.devArr)) args.devArr = [args.devArr]
-    const devArr = args.devArr
-    const devImg = (devArr.filter(x => x && x.hasImage) || devArr)[0]
+    const devArr = args.devArr.filter(x => x && x.key)
+    const devImg = (devArr.filter(x => x.hasImage) || devArr)[0]
     const name = args.name
     const devPath = encodeURI(args.path)
     const description = args.description
@@ -36,124 +210,133 @@ module.exports = function(args) {
     const show = args.show
     const subgroups = args.subgroups || []
     const osStrArr = args.osStrArr || []
+    const allDevices = !!args.allDevices
     let groupImg = []
     if (grouped && !mainList) {
-        groupImg = devArr.filter(x => x && x.hasImage && (args.imageKey == x.key || !args.imageKey)).map(x => x.img)
+        groupImg = devArr.filter(x => x.hasImage && (args.imageKey == x.key || !args.imageKey)).map(x => x.img)
     }
-    
+
+    const devKeySet = new Set(devArr.map(x => x.key))
+    const devByKey = new Map(devArr.map(x => [x.key, x]))
+
     let devFwArr = iosList
-    if (!mainList) devFwArr = devFwArr.filter(i => {
-        const fwDevArr = Object.keys(i.deviceMap)
-        const devIdArr = devArr.map(x => x.key)
-        for (const id of devIdArr) if (fwDevArr.includes(id)) return true
-        return false
-    })
-
-    if (osStrArr.length) devFwArr = devFwArr.filter(i => osStrArr.includes(i.osStr))
-
-    const devFwVersionArr = devFwArr.map(x => [x.osStr,x.version].join(' '))
-    const duplicateVersionArr = devFwVersionArr.filter((fw, index) => index !== devFwVersionArr.indexOf(fw))
-
-    function getDevType(type) {
-        for (const devType of deviceFilterGroups) if (devType.types.includes(type)) return devType.label
-        return type
-    }
-
-    function getDlArr(propertyName, fw) {
-        let retArr = Object.keys(fw.deviceMap)
-            .filter(x => devArr.map(y => y.key).includes(x))
-            .map(key => {
-                if (!fw.sources) return
-
-                let sources = fw.sources.filter(s => s.type == propertyName && s.deviceMap.includes(key))
-                if (!sources.length) return
-
-                let urlArray = sources[0].links.filter(x => x.active)
-                if (!urlArray.length) return
-
-                return {
-                    deviceName: devArr.filter(y => y.key == key)[0].name,
-                    key: key,
-                    label: "Label",
-                    url: urlArray[0].url
-                }
-            }
-        ).filter(x => x)
-
-        urlCount = Array.from(new Set(retArr)).length
-        if (urlCount == 1) retArr = [retArr[0]]
-        
-        return retArr
-    }
-
-    let getVersionArr = devFwArr.map(i => {
-        const dlArr = getDlArr('ipsw',i)
-        const otaArr = getDlArr('ota',i)
-
-        const devIdFwArr = Object.keys(i.deviceMap).filter(x => devArr.map(x => x.key).includes(x))
-        const devTypeArr = Array.from(
-            new Set(
-                devIdFwArr.map(x => devArr.filter(y => y.key == x)[0])
-                        .map(x => x.type)
-                        .map(x => getDevType(x))
-            )
-        )
-
-        let released
-        if (!i.released) released = undefined
-        else {
-            const dateOffset = (new Date().getTimezoneOffset() * 60 * 1000) + (60 * 60000)
-            const currentDate = new Date(i.released).valueOf()
-            const adjustedDate = new Date(currentDate + dateOffset)
-
-            const releasedArr = i.released.split('-')
-            const dateStyleArr = [{ year: 'numeric' }, { year: 'numeric', month: 'short' }, { dateStyle: 'medium' }]
-            released = new Intl.DateTimeFormat('en-US', dateStyleArr[releasedArr.length-1]).format(adjustedDate)
-        }
-
-        let jbCompatibility = {}
-        if (hasJbArr.includes(i.osStr)) jbList.forEach(jb => {
-            if (!jb.compatibility) return;
-            let compatibility = jb.compatibility.filter(x => x.firmwares.includes(i.build)).map(x => x.devices).flat(Infinity)
-            compatibility = [...new Set(compatibility).intersection(new Set(devIdFwArr))]
-            if (compatibility.length) jbCompatibility[jb.name] = compatibility
+    if (!mainList) {
+        devFwArr = iosList.filter(fw => {
+            for (const key of deviceMapKeys(fw.deviceMap)) if (devKeySet.has(key)) return true
+            return false
         })
+    }
+    if (osStrArr.length) {
+        const osSet = new Set(osStrArr)
+        devFwArr = devFwArr.filter(fw => osSet.has(fw.osStr))
+    }
 
-        let osStrSuffix = ''
-        if (i.osStr == 'Safari' && i.osMap) {
-            osStrSuffix = ` (${i.osMap.join(", ")})`
+    const duplicateVersions = new Set()
+    const seenVersions = new Set()
+    for (const fw of devFwArr) {
+        const key = `${fw.osStr}\0${fw.version}`
+        if (seenVersions.has(key)) duplicateVersions.add(key)
+        else seenVersions.add(key)
+    }
+
+    const osStrSeen = []
+    const osStrSeenSet = new Set()
+
+    let getVersionArr = devFwArr.map(fw => {
+        const devIdFwArr = []
+        for (const key of deviceMapKeys(fw.deviceMap)) if (devKeySet.has(key)) devIdFwArr.push(key)
+        const devIdSet = new Set(devIdFwArr)
+
+        const devTypeArr = []
+        const typeSeen = new Set()
+        for (const key of devIdFwArr) {
+            const dev = devByKey.get(key)
+            if (!dev) continue
+            const label = getDevType(dev.type)
+            if (typeSeen.has(label)) continue
+            typeSeen.add(label)
+            devTypeArr.push(label)
         }
 
-        return {
-            osStr: `${i.osStr}${osStrSuffix}`,
-            version: i.version,
-            build: i.build,
-            uniqueBuild: i.uniqueBuild,
-            duplicateVersion: duplicateVersionArr.includes([i.osStr,i.version].join(' ')),
-            url: `/firmware/${i.osStr.replace(/ /g,'-')}/${i.uniqueBuild}.html`,
-            released: i.released,
-            preinstalled: Array.isArray(i.preinstalled) ? i.preinstalled : i.preinstalled ? devIdFwArr : [],
-            signed: Array.isArray(i.signed) ? i.signed : i.signed ? devIdFwArr : [],
-            beta: i.beta,
-            internal: i.internal,
-            rc: i.rc,
-            bsi: i.bsi,
-            rsr: i.rsr,
-            releasedStr: released,
-            devices: devIdFwArr,
-            deviceFilterArr: (mainList) ?
-                devTypeArr :
-                devIdFwArr,
-            jailbreakCompatibility: jbCompatibility,
-            downloads: dlArr,
-            filteredDownloads: getFilteredDownloads(dlArr),
-            otas: otaArr,
-            filteredOtas: getFilteredDownloads(otaArr),
-            showSigning: i.showSigning
+        let preinstalledOnDevice = false
+        let fullyPreinstalled = devIdFwArr.length > 0
+        if (Array.isArray(fw.preinstalled)) {
+            const preSet = new Set(fw.preinstalled)
+            for (const key of devIdFwArr) {
+                if (preSet.has(key)) preinstalledOnDevice = true
+                else fullyPreinstalled = false
+            }
+            if (!preinstalledOnDevice) fullyPreinstalled = false
+        } else if (fw.preinstalled) {
+            preinstalledOnDevice = devIdFwArr.length > 0
+            fullyPreinstalled = preinstalledOnDevice
+        } else {
+            fullyPreinstalled = false
         }
+
+        let signed = false
+        if (Array.isArray(fw.signed)) {
+            for (const key of fw.signed) if (devIdSet.has(key)) { signed = true; break }
+        } else if (fw.signed) {
+            signed = devIdFwArr.length > 0
+        }
+
+        let checkSigning = false
+        if (Array.isArray(fw.showSigning)) {
+            for (const key of fw.showSigning) if (devIdSet.has(key)) { checkSigning = true; break }
+        } else {
+            checkSigning = !!fw.showSigning
+        }
+
+        const detail = firmwareDetail(fw)
+        const flatDownloads = linksForPage(detail.filteredDownloads, devIdSet)
+        const flatOtas = linksForPage(detail.filteredOtas, devIdSet)
+        const jailbreakArr = jailbreakNamesForPage(detail.jailbreaks, devIdSet)
+
+        let detailUrl
+        if (mainList && (flatDownloads.length || flatOtas.length || jailbreakArr.length || detail.filteredDownloads.length || detail.filteredOtas.length || detail.jailbreaks.length)) {
+            detailUrl = writeDetailOnce(fw, detail)
+        }
+
+        const osStrSuffix = (fw.osStr == 'Safari' && fw.osMap) ? ` (${fw.osMap.join(', ')})` : ''
+        const osStr = `${fw.osStr}${osStrSuffix}`
+        if (!osStrSeenSet.has(osStr)) {
+            osStrSeenSet.add(osStr)
+            osStrSeen.push(osStr)
+        }
+
+        const row = {
+            osStr,
+            version: fw.version,
+            url: `/firmware/${fw.osStr.replace(/ /g, '-')}/${fw.uniqueBuild}.html`,
+            deviceFilterArr: mainList ? devTypeArr : devIdFwArr,
+            released: fw.released,
+            fullyPreinstalled
+        }
+        if (fw.build) row.build = fw.build
+        if (fw.uniqueBuild) row.uniqueBuild = fw.uniqueBuild
+        if (duplicateVersions.has(`${fw.osStr}\0${fw.version}`)) row.duplicateVersion = true
+        const releasedStr = formatReleased(fw.released)
+        if (releasedStr) row.releasedStr = releasedStr
+        if (fw.beta) row.beta = true
+        if (fw.rc) row.rc = true
+        if (fw.internal) row.internal = true
+        if (fw.rsr) row.rsr = true
+        if (fw.bsi) row.bsi = true
+        if (signed) row.signed = true
+        if (checkSigning) row.checkSigning = true
+        if (preinstalledOnDevice) row.preinstalledOnDevice = true
+        if (flatDownloads.length || flatOtas.length) row.hasDownload = true
+        if (!mainList) {
+            if (flatDownloads.length) row.filteredDownloads = flatDownloads
+            if (flatOtas.length) row.filteredOtas = flatOtas
+            if (jailbreakArr.length) row.jailbreakArr = jailbreakArr
+        } else if (detailUrl && (flatDownloads.length || flatOtas.length || jailbreakArr.length)) {
+            row.detailUrl = detailUrl
+        }
+        return row
     })
 
-    const osStr = Array.from(new Set(getVersionArr.map(x => x.osStr)))
     const head = (mainList || !devImg || !devImg.hasImage) ? [] : [
         [
         "meta",
@@ -166,7 +349,7 @@ module.exports = function(args) {
 
     const propertyArr = ['name','identifier','appLink','key','released','discontinued','soc','arch','model','board','type','colors','img']
     const linkableArr = ['appLink']
-    const infoArr = devArr.map(x => {
+    const infoArr = mainList ? [] : devArr.map(x => {
         var o = {}
         for (const p of propertyArr)
             if (x[p])
@@ -183,34 +366,7 @@ module.exports = function(args) {
         return o
     })
 
-    /*var extraInfo = undefined
-    if (!mainList && devArr.map(x => x.info).filter(x => x).length > 0) {
-        let extraInfoObj = {}
-        for (const i of devArr) extraInfoObj[i.identifier] = i.info
-
-        extraInfo = []
-        for (const dev in extraInfoObj)
-        if (extraInfoObj[dev])
-        for (const i of extraInfoObj[dev]) {
-            if (!extraInfo.map(x => x.type).includes(i.type)) {
-                let retObj = {}
-                for (p in i) retObj[p] = p == 'type' ? i[p] : [i[p]] 
-                extraInfo.push(retObj)
-            } else {
-                let retObj = extraInfo.filter(x => x.type == i.type)[0]
-                let properties = Array.from(new Set(Object.keys(i).concat(Object.keys(retObj)).filter(x => x != 'type')))
-                for (p of properties) {
-                    if (!retObj.hasOwnProperty(p)) retObj[p] = [i[p]]
-                    else if (!retObj[p].map(x => JSON.stringify(x)).includes(JSON.stringify(i[p]))) retObj[p].push(i[p])
-                }
-            }
-        }
-    }*/
     var extraInfo = undefined
-    /*if (!mainList && devArr.map(x => x.info).filter(x => x).length > 0) {
-        extraInfo = {}
-        for (const i of devArr) extraInfo[i.key] = i.info
-    }*/
 
     let img = devImg ? devImg.img : { key: 'logo', images: [{'id': 0, 'dark': true}] }
 
@@ -221,23 +377,50 @@ module.exports = function(args) {
         imgCount = 0
     }
 
-    getVersionArr = getVersionArr.reverse().sort((a,b) => {
-        const time = [a,b].map(x => x.released ? new Date(x.released).getTime() : 0)
-        if (time[0] < time[1]) return 1
-        if (time[0] > time[1]) return -1
-        const osStr = [a,b].map(x => x.osStr.toLowerCase())
-        if (osStr[0] < osStr[1]) return -1
-        if (osStr[0] > osStr[1]) return 1
+    getVersionArr = getVersionArr.reverse().sort((a, b) => {
+        const timeA = a.released ? Date.parse(a.released) : 0
+        const timeB = b.released ? Date.parse(b.released) : 0
+        if (timeA < timeB) return 1
+        if (timeA > timeB) return -1
+        const osA = a.osStr.toLowerCase()
+        const osB = b.osStr.toLowerCase()
+        if (osA < osB) return -1
+        if (osA > osB) return 1
         return 0
     })
 
-    const hasFirmwares = {
-        release: getVersionArr.filter(x => !(x.beta || x.rc || x.internal)).length > 0,
-        beta: getVersionArr.filter(x => x.beta || x.rc).length > 0,
-        internal: getVersionArr.filter(x => x.internal).length > 0
+    if (!mainList) {
+        getVersionArr.sort((a, b) => {
+            if (a.fullyPreinstalled == b.fullyPreinstalled) return 0
+            return a.fullyPreinstalled ? 1 : -1
+        })
     }
 
-    const hasFirmwareFilters = Object.keys(hasFirmwares).map(x => hasFirmwares[x]).reduce((a,b) => a + b) > 1
+    for (const row of getVersionArr) {
+        delete row.released
+        delete row.fullyPreinstalled
+    }
+
+    const hasFirmwares = {
+        release: getVersionArr.some(x => !(x.beta || x.rc || x.internal)),
+        beta: getVersionArr.some(x => x.beta || x.rc),
+        internal: getVersionArr.some(x => x.internal)
+    }
+
+    const hasFirmwareFilters = Object.keys(hasFirmwares).filter(x => hasFirmwares[x]).length > 1
+
+    let firmwareIndex
+    if (mainList) {
+        fs.mkdirSync(indexDir, { recursive: true })
+        const slug = chartSlug(devPath)
+        firmwareIndex = `/pageData/firmware-index/${slug}.json`
+        fs.writeFileSync(path.join(indexDir, `${slug}.json`), JSON.stringify(getVersionArr))
+    }
+
+    let jbCount = 0
+    if (!mainList) {
+        for (const row of getVersionArr) jbCount += row.jailbreakArr ? row.jailbreakArr.length : 0
+    }
 
     return {
         path: devPath,
@@ -249,13 +432,9 @@ module.exports = function(args) {
             chartType: 'device',
             widePage: false,
             device: infoArr,
-            versionArr: getVersionArr.sort((a,b) => {
-                if (mainList) return 0
-                const compare = [a,b].map(x => x.devices.every(r => x.preinstalled.includes(r)))
-                if (compare[0] < compare[1]) return -1
-                if (compare[0] > compare[1]) return 1
-                return 0
-            }),
+            versionArr: mainList ? [] : getVersionArr,
+            firmwareIndex: firmwareIndex,
+            deviceKeys: (mainList && !allDevices) ? devArr.map(x => x.key) : undefined,
             hasFirmwares: hasFirmwares,
             hasFirmwareFilters: hasFirmwareFilters,
             grouped: grouped,
@@ -287,11 +466,11 @@ module.exports = function(args) {
             show: show || {
                 releaseType: hasFirmwareFilters ? [ 'release' ] : Object.keys(hasFirmwares).find(x => hasFirmwares[x])
             },
-            noJb: (!(osStr.some(r => hasJbArr.includes(r))) && !mainList),
-            jbCount: getVersionArr.map(x => x.jailbreakArr).flat().length,
+            noJb: (!(osStrSeen.some(r => hasJbSet.has(r))) && !mainList),
+            jbCount: jbCount,
             img: img,
             extraInfo: extraInfo || undefined,
-            deviceFilter: (mainList) ? 
+            deviceFilter: (mainList) ?
                 Array.from(new Set(devArr.map(x => getDevType(x.type)))).sort((a, b) => a.localeCompare(b)).map(x => {
                     return {
                         label: x,

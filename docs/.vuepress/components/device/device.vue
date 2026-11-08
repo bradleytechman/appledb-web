@@ -18,11 +18,13 @@
         </template>
     </template>
 
-    <p v-if="fm.device[0].key.startsWith('Polishing Cloth')">Dedicated to Aaron.</p>
+    <p v-if="fm.device[0] && fm.device[0].key && fm.device[0].key.startsWith('Polishing Cloth')">Dedicated to Aaron.</p>
 
     <firmwareVersionTableWrapper
-        v-if="fm.versionArr && fm.versionArr.length > 0"
+        v-if="(fm.versionArr && fm.versionArr.length > 0) || fm.firmwareIndex"
         :fmVersionArr="fm.versionArr"
+        :firmwareIndex="fm.firmwareIndex"
+        :deviceKeys="fm.deviceKeys"
         :deviceFilter="fm.deviceFilter"
         :mainList="fm.mainList"
         :hasFirmwares="fm.hasFirmwares"
@@ -57,6 +59,7 @@ export default {
     },
     computed: {
         colors() {
+            if (!this.fm.device || !this.fm.device.length) return []
             if (this.fm.device.length == 1) return this.fm.device[0].colors
             let colors = {}
             for (const dev of this.fm.device) {
