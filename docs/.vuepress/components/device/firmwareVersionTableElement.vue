@@ -145,7 +145,7 @@
             </ul>
         </div>
         <div class="custom-container">
-            <p><a :href="fw.url">View more <i style="font-size: 0.8em; padding-left: 2px;" class="fas fa-arrow-right"></i></a></p>
+            <p><router-link :to="fw.url">View more <i style="font-size: 0.8em; padding-left: 2px;" class="fas fa-arrow-right"></i></router-link></p>
         </div>
         <div class="custom-container" v-if="options.showTweetButton"><p>
             <a

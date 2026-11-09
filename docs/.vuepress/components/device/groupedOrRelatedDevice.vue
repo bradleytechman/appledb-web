@@ -1,5 +1,5 @@
 <template>
-    <a :href="device.url"><div
+    <router-link :to="device.url"><div
         class="gridWrapper"
         :style="{
             'grid-template-columns': device.imgNames.length > 0 ? '3em calc(100% - 3em)' : '100%'
@@ -16,7 +16,7 @@
                 {{ released }}
             </div>
         </div>
-    </div></a>
+    </div></router-link>
 </template>
 
 <script>

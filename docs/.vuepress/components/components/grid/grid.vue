@@ -7,7 +7,8 @@
             v-for="i in content"
             :key="i.key"
         >
-            <a v-if="i.link" :href="i.link"><gridElement :sectionClass="sectionClass" class="gridElement" :content="i"/></a>
+            <router-link v-if="i.link && !i.link.startsWith('http')" :to="i.link"><gridElement :sectionClass="sectionClass" class="gridElement" :content="i"/></router-link>
+            <a v-else-if="i.link" :href="i.link"><gridElement :sectionClass="sectionClass" class="gridElement" :content="i"/></a>
             <gridElement v-else :sectionClass="sectionClass" :content="i"/>
         </template>
     </div>

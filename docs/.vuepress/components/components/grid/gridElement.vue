@@ -20,7 +20,8 @@
                 <div class="links" v-if="content.links">
                     <ul>
                         <li v-for="link in content.links" :key="link">
-                            <a v-if="link.link" :href="link.link"><i v-if="link.icon" :class="link.icon"></i> {{ link.text }}</a>
+                            <router-link v-if="link.link && !link.link.startsWith('http')" :to="link.link"><i v-if="link.icon" :class="link.icon"></i> {{ link.text }}</router-link>
+                            <a v-else-if="link.link" :href="link.link"><i v-if="link.icon" :class="link.icon"></i> {{ link.text }}</a>
                             <template v-else><i v-if="link.icon" :class="link.icon"></i> {{ link.text }}</template>
                         </li>
                     </ul>
