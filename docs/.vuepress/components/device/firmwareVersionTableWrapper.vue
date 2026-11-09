@@ -8,7 +8,7 @@
                 margin-inline: 10px;
                 font-size: 1em;
                 cursor: pointer;
-            " @click="versionArr.reverse()"
+            " @click="reverseVersions()"
         ></i>
     </h5>
 
@@ -103,7 +103,7 @@
         </div>
         <div class="separatorAfter"></div>
         <div
-            @click="versionArr.reverse()"
+            @click="reverseVersions()"
             class="btn"
         >
             <i class="fas fa-sort"></i> Sort
@@ -356,6 +356,12 @@ export default {
                 this._ro.observe(el)
                 this._observed.push(el)
             }
+        },
+        reverseVersions() {
+            const rows = (this.versionArr || []).slice().reverse()
+            this.versionArr = markRaw(rows)
+            this._heights = {}
+            this.rebuildPrefix()
         },
         filterVersions() {
             const showRelease = this.options.showRelease

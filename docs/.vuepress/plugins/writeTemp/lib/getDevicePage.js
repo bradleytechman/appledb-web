@@ -132,15 +132,10 @@ function firmwareDetail(fw) {
 function linksForPage(groups, devKeySet) {
     const out = []
     for (const group of groups) {
-        let first = null
         for (const link of group.links) {
-            if (devKeySet.has(link.key)) {
-                first = link
-                break
-            }
+            if (!devKeySet.has(link.key)) continue
+            out.push({ url: group.url, deviceName: link.deviceName, key: link.key })
         }
-        if (!first) continue
-        out.push({ url: group.url, deviceName: first.deviceName, key: first.key })
     }
     return out
 }

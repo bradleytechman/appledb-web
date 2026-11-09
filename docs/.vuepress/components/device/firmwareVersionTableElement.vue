@@ -86,14 +86,14 @@
                             <h5>Download</h5>
                             <ul :style="`${downloads.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
                                 <li v-if="downloads.length == 1"><a :href="downloads[0].url">{{ downloads[0].deviceName.slice(0,60) }}{{ downloads[0].deviceName.length > 60 ? '...' : '' }}</a></li>
-                                <li v-else v-for="dl in downloads" :key="dl.url"><a :href="dl.url">{{ dl.deviceName }}</a></li>
+                                <li v-else v-for="dl in downloads" :key="dl.key"><a :href="dl.url">{{ dl.deviceName }}</a></li>
                             </ul>
                         </template>
                         <template v-if="otas.length">
                             <h5>Download (OTA)</h5>
                             <ul :style="`${otas.length == 1 ? 'padding-left: 0; list-style-type: none;' : ''}`">
                                 <li v-if="otas.length == 1"><a :href="otas[0].url">{{ otas[0].deviceName.slice(0,60) }}{{ otas[0].deviceName.length > 60 ? '...' : '' }}</a></li>
-                                <li v-else v-for="dl in otas" :key="dl.url"><a :href="dl.url">{{ dl.deviceName }}</a></li>
+                                <li v-else v-for="dl in otas" :key="dl.key"><a :href="dl.url">{{ dl.deviceName }}</a></li>
                             </ul>
                         </template>
                     </div>
@@ -170,19 +170,10 @@ import { siteUrl } from '../../siteUrl.js'
 function projectLinks(groups, allow) {
     const out = []
     for (const group of groups || []) {
-        const links = group.links || []
-        let first = null
-        if (!allow) first = links[0]
-        else {
-            for (const link of links) {
-                if (allow.has(link.key)) {
-                    first = link
-                    break
-                }
-            }
+        for (const link of group.links || []) {
+            if (allow && !allow.has(link.key)) continue
+            out.push({ url: group.url, deviceName: link.deviceName, key: link.key })
         }
-        if (!first) continue
-        out.push({ url: group.url, deviceName: first.deviceName, key: first.key })
     }
     return out
 }

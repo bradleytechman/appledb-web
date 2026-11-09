@@ -3,9 +3,9 @@ import Home from '@theme/Home.vue'
 import Navbar from '@theme/Navbar.vue'
 import Page from '../components/components/Page.vue'
 import Sidebar from '@theme/Sidebar.vue'
-import { usePageData, usePageFrontmatter } from '@vuepress/client'
+import { usePageFrontmatter } from '@vuepress/client'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { DefaultThemePageFrontmatter } from '@vuepress/theme-default/lib/shared'
 import {
   useScrollPromise,
@@ -13,7 +13,7 @@ import {
   useThemeLocaleData,
 } from '@vuepress/theme-default/lib/client/composables'
 
-const page = usePageData()
+const route = useRoute()
 const frontmatter = usePageFrontmatter<DefaultThemePageFrontmatter>()
 const themeLocale = useThemeLocaleData()
 
@@ -102,7 +102,7 @@ const onBeforeLeave = scrollPromise.pending
         @before-enter="onBeforeEnter"
         @before-leave="onBeforeLeave"
       >
-        <Page :key="page.path">
+        <Page :key="route.path">
           <template #top>
             <slot name="page-top" />
           </template>
